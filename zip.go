@@ -16,7 +16,7 @@ import (
 	"github.com/klauspost/compress/zip"
 	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
-	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/encoding"
 )
 
 // ZipCompressionMethod Compression type
@@ -79,6 +79,8 @@ type Zip struct {
 	// or writing a single file will be logged and
 	// the operation will continue on remaining files.
 	ContinueOnError bool
+
+	TextEncoding encoding.Encoding
 
 	// Compression algorithm
 	FileMethod ZipCompressionMethod
@@ -249,12 +251,15 @@ func (z *Zip) decodeFileHeader() error {
 	if z.zr == nil {
 		return fmt.Errorf("zip archive is not open")
 	}
+	if z.TextEncoding == nil {
+		return nil
+	}
 	for _, f := range z.zr.File {
 		if f.FileHeader.NonUTF8 {
-			if filename, err := decodeText(f.FileHeader.Name); err == nil {
+			if filename, err := decodeText(f.FileHeader.Name, z.TextEncoding); err == nil {
 				f.FileHeader.Name = filename
 			}
-			if comment, err := decodeText(f.FileHeader.Comment); err == nil {
+			if comment, err := decodeText(f.FileHeader.Comment, z.TextEncoding); err == nil {
 				f.FileHeader.Comment = comment
 			}
 		}
@@ -262,8 +267,8 @@ func (z *Zip) decodeFileHeader() error {
 	return nil
 }
 
-func decodeText(input string) (string, error) {
-	return simplifiedchinese.GBK.NewDecoder().String(input)
+func decodeText(input string, codec encoding.Encoding) (string, error) {
+	return codec.NewDecoder().String(input)
 }
 
 func (z *Zip) extractNext(to string) error {
