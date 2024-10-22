@@ -16,6 +16,7 @@ import (
 	"github.com/klauspost/compress/zip"
 	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 // ZipCompressionMethod Compression type
@@ -210,6 +211,10 @@ func (z *Zip) Unarchive(source, destination string) error {
 	}
 	defer z.Close()
 
+	if err := z.decodeFileHeader(); err != nil {
+		return fmt.Errorf("decoding file header: %v", err)
+	}
+
 	// if the files in the archive do not all share a common
 	// root, then make sure we extract to a single subfolder
 	// rather than potentially littering the destination...
@@ -238,6 +243,27 @@ func (z *Zip) Unarchive(source, destination string) error {
 	}
 
 	return nil
+}
+
+func (z *Zip) decodeFileHeader() error {
+	if z.zr == nil {
+		return fmt.Errorf("zip archive is not open")
+	}
+	for _, f := range z.zr.File {
+		if f.FileHeader.NonUTF8 {
+			if filename, err := decodeText(f.FileHeader.Name); err == nil {
+				f.FileHeader.Name = filename
+			}
+			if comment, err := decodeText(f.FileHeader.Comment); err == nil {
+				f.FileHeader.Comment = comment
+			}
+		}
+	}
+	return nil
+}
+
+func decodeText(input string) (string, error) {
+	return simplifiedchinese.GBK.NewDecoder().String(input)
 }
 
 func (z *Zip) extractNext(to string) error {

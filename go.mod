@@ -12,4 +12,5 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.2
 	github.com/ulikunitz/xz v0.5.9
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
+	golang.org/x/text v0.19.0
 )
