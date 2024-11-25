@@ -82,6 +82,10 @@ type Zip struct {
 
 	TextEncoding encoding.Encoding
 
+	// SyncProgressCallback is called during the process of archiving or unarchiving, it is called every time a file is processed.
+	// Warning: This callback is called in the same goroutine as the archiving or unarchiving process, so it should not block.
+	SyncProgressCallback func(total, processed int)
+
 	// Compression algorithm
 	FileMethod ZipCompressionMethod
 	zw         *zip.Writer
@@ -176,10 +180,13 @@ func (z *Zip) Archive(sources []string, destination string) error {
 		topLevelFolder = folderNameFromFileName(destination)
 	}
 
-	for _, source := range sources {
+	for i, source := range sources {
 		err := z.writeWalk(source, topLevelFolder, destination)
 		if err != nil {
 			return fmt.Errorf("walking %s: %v", source, err)
+		}
+		if z.SyncProgressCallback != nil {
+			z.SyncProgressCallback(len(sources), i+1)
 		}
 	}
 
@@ -241,6 +248,9 @@ func (z *Zip) Unarchive(source, destination string) error {
 				continue
 			}
 			return fmt.Errorf("reading file in zip archive: %v", err)
+		}
+		if z.SyncProgressCallback != nil {
+			z.SyncProgressCallback(len(z.zr.File), z.ridx)
 		}
 	}
 
