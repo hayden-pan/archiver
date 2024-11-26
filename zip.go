@@ -15,8 +15,10 @@ import (
 	"github.com/dsnet/compress/bzip2"
 	"github.com/klauspost/compress/zip"
 	"github.com/klauspost/compress/zstd"
+	"github.com/saintfish/chardet"
 	"github.com/ulikunitz/xz"
 	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/ianaindex"
 )
 
 // ZipCompressionMethod Compression type
@@ -80,7 +82,7 @@ type Zip struct {
 	// the operation will continue on remaining files.
 	ContinueOnError bool
 
-	TextEncoding encoding.Encoding
+	DefaultNoneUTF8TextEncoding encoding.Encoding
 
 	// SyncProgressCallback is called during the process of archiving or unarchiving, it is called every time a file is processed.
 	// Warning: This callback is called in the same goroutine as the archiving or unarchiving process, so it should not block.
@@ -261,20 +263,51 @@ func (z *Zip) decodeFileHeader() error {
 	if z.zr == nil {
 		return fmt.Errorf("zip archive is not open")
 	}
-	if z.TextEncoding == nil {
+
+	enc := z.fileHeaderNonUTF8Encoding()
+	if enc == nil {
 		return nil
 	}
+
 	for _, f := range z.zr.File {
 		if f.FileHeader.NonUTF8 {
-			if filename, err := decodeText(f.FileHeader.Name, z.TextEncoding); err == nil {
+			if filename, err := decodeText(f.FileHeader.Name, enc); err == nil {
 				f.FileHeader.Name = filename
 			}
-			if comment, err := decodeText(f.FileHeader.Comment, z.TextEncoding); err == nil {
+			if comment, err := decodeText(f.FileHeader.Comment, enc); err == nil {
 				f.FileHeader.Comment = comment
 			}
 		}
 	}
 	return nil
+}
+
+var detector = chardet.NewTextDetector()
+
+func (z *Zip) fileHeaderNonUTF8Encoding() encoding.Encoding {
+	// concat all file names and comments to detect the encoding
+	var nonUTF8Texts [][]byte
+	for _, f := range z.zr.File {
+		if f.FileHeader.NonUTF8 {
+			nonUTF8Texts = append(nonUTF8Texts, []byte(f.FileHeader.Name))
+			if len(f.FileHeader.Comment) > 0 {
+				nonUTF8Texts = append(nonUTF8Texts, []byte(f.FileHeader.Comment))
+			}
+		}
+	}
+	if len(nonUTF8Texts) == 0 {
+		return nil
+	}
+	nonUTF8Text := bytes.Join(nonUTF8Texts, []byte{'\n'})
+	result, err := detector.DetectBest(nonUTF8Text)
+	if err != nil {
+		return z.DefaultNoneUTF8TextEncoding
+	}
+	enc, err := ianaindex.IANA.Encoding(result.Charset)
+	if err != nil {
+		return z.DefaultNoneUTF8TextEncoding
+	}
+	return enc
 }
 
 func decodeText(input string, codec encoding.Encoding) (string, error) {
