@@ -537,4 +537,5 @@ var matchers = []Matcher{
 	&Rar{},
 	&Tar{},
 	&Zip{},
+	&SevenZip{},
 }
