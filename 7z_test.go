@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/hayden-pan/archiver/v3"
 )
@@ -151,5 +152,37 @@ func TestMatchSevenZip(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("expected no match")
+	}
+}
+
+func TestUnarchiveSevenZipPreserveModTime(t *testing.T) {
+	dst := t.TempDir()
+	arc := &archiver.SevenZip{OverwriteExisting: true, PreserveModTime: false}
+
+	modTime := time.Unix(1733564187, 0)
+
+	if err := arc.Unarchive("testdata/testarchives/7z/normal.7z", dst); err != nil {
+		t.Fatal(err)
+	}
+
+	fi, err := os.Stat(filepath.Join(dst, "file1.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fi.ModTime().Unix() == modTime.Unix() {
+		t.Fatalf("modified timestamp should be now")
+	}
+
+	arc.PreserveModTime = true
+	if err := arc.Unarchive("testdata/testarchives/7z/normal.7z", dst); err != nil {
+		t.Fatal(err)
+	}
+	fi, err = os.Stat(filepath.Join(dst, "file1.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.ModTime().Unix() != modTime.Unix() {
+		t.Fatalf("expected modified timestamp %v, got %v", modTime.Unix(), fi.ModTime().Unix())
 	}
 }

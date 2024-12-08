@@ -49,6 +49,9 @@ type Rar struct {
 	// the operation will continue on remaining files.
 	ContinueOnError bool
 
+	// Whether to preserve the modification time when extracting files.
+	PreserveModTime bool
+
 	// The password to open archives (optional).
 	Password string
 
@@ -223,7 +226,19 @@ func (r *Rar) unrarFile(f File, to string) error {
 		return nil
 	}
 
-	return writeNewFile(to, r.rr, hdr.Mode())
+	return r.writeNewFile(to, r.rr, hdr)
+}
+
+func (r *Rar) writeNewFile(to string, content io.Reader, hdr *rardecode.FileHeader) error {
+	if err := writeNewFile(to, content, hdr.Mode()); err != nil {
+		return err
+	}
+	if r.PreserveModTime {
+		if err := os.Chtimes(to, hdr.ModificationTime, hdr.ModificationTime); err != nil {
+			return fmt.Errorf("setting modtime for %s err: %v", to, err)
+		}
+	}
+	return nil
 }
 
 // OpenFile opens filename for reading. This method supports

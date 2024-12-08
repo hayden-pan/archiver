@@ -82,6 +82,9 @@ type Zip struct {
 	// the operation will continue on remaining files.
 	ContinueOnError bool
 
+	// PreserveModTime is whether to preserve the modification time when extracting files.
+	PreserveModTime bool
+
 	DefaultNoneUTF8TextEncoding encoding.Encoding
 
 	// SyncProgressCallback is called during the process of archiving or unarchiving, it is called every time a file is processed.
@@ -368,7 +371,19 @@ func (z *Zip) extractFile(f File, to string, header *zip.FileHeader) error {
 		return writeNewSymbolicLink(to, strings.TrimSpace(buf.String()))
 	}
 
-	return writeNewFile(to, f, f.Mode())
+	return z.writeNewFile(to, f)
+}
+
+func (z *Zip) writeNewFile(to string, f File) error {
+	if err := writeNewFile(to, f, f.Mode()); err != nil {
+		return err
+	}
+	if z.PreserveModTime {
+		if err := os.Chtimes(to, f.ModTime(), f.ModTime()); err != nil {
+			return fmt.Errorf("setting modtime for %s err: %v", to, err)
+		}
+	}
+	return nil
 }
 
 func (z *Zip) writeWalk(source, topLevelFolder, destination string) error {

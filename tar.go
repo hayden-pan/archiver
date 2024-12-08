@@ -49,6 +49,9 @@ type Tar struct {
 	// the operation will continue on remaining files.
 	ContinueOnError bool
 
+	// PresserveModTime is whether to preserve the file's modification time when untar a file.
+	PreserveModTime bool
+
 	tw *tar.Writer
 	tr *tar.Reader
 
@@ -263,7 +266,7 @@ func (t *Tar) untarFile(f File, destination string, hdr *tar.Header) error {
 	case tar.TypeDir:
 		return mkdir(to, f.Mode())
 	case tar.TypeReg, tar.TypeRegA, tar.TypeChar, tar.TypeBlock, tar.TypeFifo, tar.TypeGNUSparse:
-		return writeNewFile(to, f, f.Mode())
+		return t.writeNewFile(to, f)
 	case tar.TypeSymlink:
 		return writeNewSymbolicLink(to, hdr.Linkname)
 	case tar.TypeLink:
@@ -273,6 +276,18 @@ func (t *Tar) untarFile(f File, destination string, hdr *tar.Header) error {
 	default:
 		return fmt.Errorf("%s: unknown type flag: %c", hdr.Name, hdr.Typeflag)
 	}
+}
+
+func (t *Tar) writeNewFile(to string, f File) error {
+	if err := writeNewFile(to, f, f.Mode()); err != nil {
+		return err
+	}
+	if t.PreserveModTime {
+		if err := os.Chtimes(to, f.ModTime(), f.ModTime()); err != nil {
+			return fmt.Errorf("setting modtime for %s err: %v", to, err)
+		}
+	}
+	return nil
 }
 
 func (t *Tar) writeWalk(source, topLevelFolder, destination string) error {

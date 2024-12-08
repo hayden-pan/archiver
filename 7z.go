@@ -7,6 +7,7 @@ import (
 	"hash/crc32"
 	"io"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -22,6 +23,9 @@ type SevenZip struct {
 	// a file within an archive will be logged and the
 	// operation will continue on remaining files.
 	ContinueOnError bool
+
+	// Whether to preserve the modification time when extracting files.
+	PreserveModTime bool
 
 	// The password to open archives (optional).
 	Password string
@@ -105,6 +109,13 @@ func (s *SevenZip) writeFile(f *sevenzip.File, path string) error {
 			return fmt.Errorf("checksum mismatch for %s", f.Name)
 		}
 	}
+	if s.PreserveModTime {
+		mod := f.FileInfo().ModTime()
+		if err := os.Chtimes(path, mod, mod); err != nil {
+			return fmt.Errorf("setting modtime for %s err: %v", path, err)
+		}
+	}
+
 	return nil
 }
 
