@@ -1,6 +1,6 @@
 module github.com/hayden-pan/archiver/v3
 
-go 1.23.3
+go 1.21
 
 require (
 	github.com/andybalholm/brotli v1.1.1
