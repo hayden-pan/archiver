@@ -506,6 +506,8 @@ func ByHeader(input io.ReadSeeker) (Unarchiver, error) {
 		return NewTar(), nil
 	case *Rar:
 		return NewRar(), nil
+	case *SevenZip:
+		return NewSevenZip(), nil
 	}
 	return nil, ErrFormatNotRecognized
 }
@@ -531,6 +533,7 @@ var extCheckers = []ExtensionChecker{
 	&Snappy{},
 	&Xz{},
 	&Zstd{},
+	&SevenZip{},
 }
 
 var matchers = []Matcher{

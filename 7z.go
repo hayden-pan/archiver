@@ -37,6 +37,14 @@ type SevenZip struct {
 	hash hash.Hash32
 }
 
+// CheckExt ensures the file extension matches the format.
+func (*SevenZip) CheckExt(filename string) error {
+	if !strings.HasSuffix(filename, ".7z") {
+		return fmt.Errorf("filename must have a .7z extension")
+	}
+	return nil
+}
+
 func (s *SevenZip) Unarchive(source, destination string) error {
 	rc, err := sevenzip.OpenReaderWithPassword(source, s.Password)
 	if err != nil {
@@ -147,4 +155,8 @@ func (s *SevenZip) Match(file io.ReadSeeker) (bool, error) {
 		return false, nil
 	}
 	return bytes.Equal(buf, []byte("7z\xBC\xAF\x27\x1C")), nil
+}
+
+func NewSevenZip() *SevenZip {
+	return &SevenZip{}
 }
