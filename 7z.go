@@ -131,7 +131,8 @@ func (s *SevenZip) extractFile(f *sevenzip.File, dest string) error {
 
 	path := filepath.Join(dest, f.Name)
 	if _, loaded := s.extractedPaths.LoadOrStore(path, struct{}{}); loaded {
-		return fmt.Errorf("file path already present at least twice: %s", path)
+		// Skip if the file has been extracted.
+		return nil
 	}
 
 	if f.FileInfo().IsDir() {
