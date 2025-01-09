@@ -1,7 +1,6 @@
 package archiver_test
 
 import (
-	"io/ioutil"
 	"os"
 	"path"
 	"testing"
@@ -31,7 +30,7 @@ func assertSameFile(t *testing.T, f1, f2 os.FileInfo) {
 func TestDefaultTar_Unarchive_HardlinkSuccess(t *testing.T) {
 	source := "testdata/gnu-hardlinks.tar"
 
-	destination, err := ioutil.TempDir("", "archiver_tar_test")
+	destination, err := os.MkdirTemp("", "archiver_tar_test")
 	if err != nil {
 		t.Fatalf("creating temp dir: %v", err)
 	}
@@ -50,7 +49,7 @@ func TestDefaultTar_Unarchive_HardlinkSuccess(t *testing.T) {
 func TestDefaultTar_Extract_HardlinkSuccess(t *testing.T) {
 	source := "testdata/gnu-hardlinks.tar"
 
-	destination, err := ioutil.TempDir("", "archiver_tar_test")
+	destination, err := os.MkdirTemp("", "archiver_tar_test")
 	if err != nil {
 		t.Fatalf("creating temp dir: %v", err)
 	}

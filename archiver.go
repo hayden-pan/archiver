@@ -45,6 +45,7 @@
 package archiver
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -81,6 +82,7 @@ type FilenameChecker interface {
 // into a folder.
 type Unarchiver interface {
 	Unarchive(source, destination string) error
+	UnarchiveContext(ctx context.Context, source, destination string) error
 }
 
 // Writer can write discrete byte streams of files to

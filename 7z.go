@@ -2,6 +2,7 @@ package archiver
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"hash"
 	"hash/crc32"
@@ -9,7 +10,9 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/bodgit/sevenzip"
 )
@@ -34,7 +37,9 @@ type SevenZip struct {
 	// Unrecommended for skipping checksum verification.
 	SkipVerifyChecksum bool
 
-	hash hash.Hash32
+	// The path of the extracted files. Used for checking duplicate of files.
+	// [string]struct{} is used to save memory.
+	extractedPaths sync.Map
 }
 
 // CheckExt ensures the file extension matches the format.
@@ -46,30 +51,68 @@ func (*SevenZip) CheckExt(filename string) error {
 }
 
 func (s *SevenZip) Unarchive(source, destination string) error {
+	return s.UnarchiveContext(context.Background(), source, destination)
+}
+
+func (s *SevenZip) UnarchiveContext(ctx context.Context, source, destination string) error {
 	rc, err := sevenzip.OpenReaderWithPassword(source, s.Password)
 	if err != nil {
 		return err
 	}
 	defer rc.Close()
 
-	if !s.SkipVerifyChecksum {
-		s.hash = crc32.NewIEEE()
-	} else {
-		s.hash = nil
-	}
-
-	for _, f := range rc.File {
-		err := s.extractFile(f, destination)
-		if err != nil {
-			if s.ContinueOnError {
-				log.Printf("[ERROR] Reading file in 7z archive: %v", err)
-				continue
-			}
-			return fmt.Errorf("reading file in 7z archive: %v", err)
-		}
+	if err := s.parallelExtractFiles(ctx, rc.File, destination); err != nil {
+		return fmt.Errorf("parallel extract files: %w", err)
 	}
 
 	return nil
+}
+
+func (s *SevenZip) parallelExtractFiles(ctx context.Context, files []*sevenzip.File, dest string) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(context.Canceled)
+
+	concurrency := newConecurrencyChan()
+
+	var wg sync.WaitGroup
+
+FilesLoop:
+	for _, f := range files {
+		select {
+		case concurrency <- struct{}{}:
+		case <-ctx.Done():
+			break FilesLoop
+		}
+
+		wg.Add(1)
+		go func(f *sevenzip.File) {
+			defer func() {
+				<-concurrency
+				wg.Done()
+			}()
+
+			if err := s.extractFile(f, dest); err != nil {
+				if s.ContinueOnError {
+					log.Printf("[ERROR] Extracting file %s: %v", f.Name, err)
+				} else {
+					cancel(fmt.Errorf("extracting file %s: %w", f.Name, err))
+				}
+			}
+		}(f)
+	}
+
+	wg.Wait()
+
+	err := context.Cause(ctx)
+	return err
+}
+
+func newConecurrencyChan() chan struct{} {
+	concurrency := runtime.GOMAXPROCS(0)
+	if concurrency <= 0 {
+		concurrency = runtime.NumCPU()
+	}
+	return make(chan struct{}, concurrency)
 }
 
 func (s *SevenZip) extractFile(f *sevenzip.File, dest string) error {
@@ -78,6 +121,9 @@ func (s *SevenZip) extractFile(f *sevenzip.File, dest string) error {
 	}
 
 	path := filepath.Join(dest, f.Name)
+	if _, loaded := s.extractedPaths.LoadOrStore(path, struct{}{}); loaded {
+		return fmt.Errorf("file path already present at least twice: %s", path)
+	}
 
 	if f.FileInfo().IsDir() {
 		if err := mkdir(path, f.FileInfo().Mode()); err != nil {
@@ -100,20 +146,21 @@ func (s *SevenZip) writeFile(f *sevenzip.File, path string) error {
 	}
 	defer rc.Close()
 
-	checksum := s.hash != nil
+	checksum := !s.SkipVerifyChecksum
 
 	var reader io.Reader
+	var hasher hash.Hash32
 	if checksum {
-		s.hash.Reset()
-		reader = io.TeeReader(rc, s.hash)
+		hasher = crc32.NewIEEE()
+		reader = io.TeeReader(rc, hasher)
 	} else {
 		reader = rc
 	}
 	if err := writeNewFile(path, reader, f.FileInfo().Mode()); err != nil {
 		return err
 	}
-	if checksum {
-		if s.hash.Sum32() != f.CRC32 {
+	if hasher != nil {
+		if hasher.Sum32() != f.CRC32 {
 			return fmt.Errorf("checksum mismatch for %s", f.Name)
 		}
 	}
