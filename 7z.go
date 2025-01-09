@@ -37,6 +37,8 @@ type SevenZip struct {
 	// Unrecommended for skipping checksum verification.
 	SkipVerifyChecksum bool
 
+	Concurrency int
+
 	// The path of the extracted files. Used for checking duplicate of files.
 	// [string]struct{} is used to save memory.
 	extractedPaths sync.Map
@@ -72,7 +74,7 @@ func (s *SevenZip) parallelExtractFiles(ctx context.Context, files []*sevenzip.F
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(context.Canceled)
 
-	concurrency := newConecurrencyChan()
+	concurrency := newConecurrencyChan(s.Concurrency)
 
 	var wg sync.WaitGroup
 
@@ -107,10 +109,17 @@ FilesLoop:
 	return err
 }
 
-func newConecurrencyChan() chan struct{} {
+func newConecurrencyChan(num int) chan struct{} {
+	if num > 0 {
+		return make(chan struct{}, num)
+	}
+
 	concurrency := runtime.GOMAXPROCS(0)
 	if concurrency <= 0 {
 		concurrency = runtime.NumCPU()
+	}
+	if concurrency <= 0 {
+		concurrency = 1
 	}
 	return make(chan struct{}, concurrency)
 }
