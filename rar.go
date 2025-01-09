@@ -2,6 +2,7 @@ package archiver
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -82,6 +83,13 @@ func (*Rar) CheckPath(to, filename string) error {
 // Destination will be treated as a folder name. It supports
 // multi-volume archives.
 func (r *Rar) Unarchive(source, destination string) error {
+	return r.UnarchiveContext(context.Background(), source, destination)
+}
+
+// UnarchiveContext unpacks the .rar file at source to destination.
+// Destination will be treated as a folder name. It supports
+// multi-volume archives.
+func (r *Rar) UnarchiveContext(ctx context.Context, source, destination string) error {
 	if !fileExists(destination) && r.MkdirAll {
 		err := mkdir(destination, 0755)
 		if err != nil {
@@ -107,6 +115,10 @@ func (r *Rar) Unarchive(source, destination string) error {
 	defer r.Close()
 
 	for {
+		if ctx.Err() != nil {
+			return fmt.Errorf("context cancelled before extraction completed: %w", context.Cause(ctx))
+		}
+
 		err := r.unrarNext(destination)
 		if err == io.EOF {
 			break

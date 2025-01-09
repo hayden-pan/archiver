@@ -3,6 +3,7 @@ package archiver
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -132,6 +133,12 @@ func (t *Tar) Archive(sources []string, destination string) error {
 // Unarchive unpacks the .tar file at source to destination.
 // Destination will be treated as a folder name.
 func (t *Tar) Unarchive(source, destination string) error {
+	return t.UnarchiveContext(context.Background(), source, destination)
+}
+
+// UnarchiveContext unpacks the .tar file at source to destination.
+// Destination will be treated as a folder name.
+func (t *Tar) UnarchiveContext(ctx context.Context, source, destination string) error {
 	if !fileExists(destination) && t.MkdirAll {
 		err := mkdir(destination, 0755)
 		if err != nil {
@@ -163,6 +170,10 @@ func (t *Tar) Unarchive(source, destination string) error {
 	defer t.Close()
 
 	for {
+		if ctx.Err() != nil {
+			return fmt.Errorf("context cancelled before finishing: %w", context.Cause(ctx))
+		}
+
 		err := t.untarNext(destination)
 		if err == io.EOF {
 			break
