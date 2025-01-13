@@ -3,45 +3,31 @@ package archiver
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"hash"
-	"hash/crc32"
 	"io"
-	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"sync"
+	"sync/atomic"
 
-	"github.com/bodgit/sevenzip"
+	_ "embed"
 )
 
+//go:embed bin/7zr.exe
+var sevenZipBin []byte
+
 type SevenZip struct {
-	// Whether to overwrite existing files; if false,
-	// an error is returned if the file exists.
-	OverwriteExisting bool
-
-	// If true, errors encountered during reading or writing
-	// a file within an archive will be logged and the
-	// operation will continue on remaining files.
-	ContinueOnError bool
-
-	// Whether to preserve the modification time when extracting files.
-	PreserveModTime bool
+	// Whether to skip extracting of existing files.
+	SkipExistingFiles bool
 
 	// The password to open archives (optional).
 	Password string
 
-	// Whether to verify the checksum of the extracted file.
-	// Unrecommended for skipping checksum verification.
-	SkipVerifyChecksum bool
+	used atomic.Bool
 
-	Concurrency int
-
-	// The path of the extracted files. Used for checking duplicate of files.
-	// [string]struct{} is used to save memory.
-	extractedPaths sync.Map
+	binPath string
 }
 
 // CheckExt ensures the file extension matches the format.
@@ -57,141 +43,62 @@ func (s *SevenZip) Unarchive(source, destination string) error {
 }
 
 func (s *SevenZip) UnarchiveContext(ctx context.Context, source, destination string) error {
-	concurrency := conecurrencyNum(s.Concurrency)
-
-	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(context.Canceled)
-
-	var wg sync.WaitGroup
-	for tid := 0; tid < concurrency; tid++ {
-		if ctx.Err() != nil {
-			break
-		}
-
-		wg.Add(1)
-		go func(tid int) {
-			defer wg.Done()
-
-			if err := s.oneThreadUnarchive(ctx, source, destination); err != nil {
-				cancel(fmt.Errorf("unarchiving error in thread %d: %w", tid, err))
-			}
-		}(tid)
+	if err := s.prepareBin(); err != nil {
+		return err
 	}
+	defer s.cleanupBin()
 
-	wg.Wait()
+	err := s.extract(ctx, source, destination)
 
-	err := context.Cause(ctx)
-	return err
-}
-
-func (s *SevenZip) oneThreadUnarchive(ctx context.Context, source, destination string) error {
-	rc, err := sevenzip.OpenReaderWithPassword(source, s.Password)
+	if ctx.Err() != nil {
+		return fmt.Errorf("context canceled before extrating done: %w, output: %v", context.Cause(ctx), err)
+	}
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
-
-	for _, f := range rc.File {
-		if ctx.Err() != nil {
-			return fmt.Errorf("context cancelled before all files extracted: %w", context.Cause(ctx))
-		}
-
-		err := s.extractFile(f, destination)
-		if err != nil {
-			if s.ContinueOnError {
-				log.Printf("[ERROR] Reading file in 7z archive: %v", err)
-				continue
-			}
-			return fmt.Errorf("reading file in 7z archive: %v", err)
-		}
-	}
 
 	return nil
 }
 
-func conecurrencyNum(num int) int {
-	if num > 0 {
-		return num
+func (s *SevenZip) prepareBin() error {
+	if s.used.Swap(true) {
+		return errors.New("the instance of the 7z unarchiver has already been used, please create another instance")
 	}
 
-	concurrency := runtime.GOMAXPROCS(0)
-	if concurrency <= 0 {
-		concurrency = runtime.NumCPU()
-	}
-	if concurrency <= 0 {
-		concurrency = 1
-	}
-	return concurrency
-}
-
-func (s *SevenZip) extractFile(f *sevenzip.File, dest string) error {
-	if err := s.CheckPath(dest, f.Name); err != nil {
-		return fmt.Errorf("checking path traversal attempt: %v", err)
-	}
-
-	path := filepath.Join(dest, f.Name)
-	if _, loaded := s.extractedPaths.LoadOrStore(path, struct{}{}); loaded {
-		// Skip if the file has been extracted.
-		return nil
-	}
-
-	if f.FileInfo().IsDir() {
-		if err := mkdir(path, f.FileInfo().Mode()); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	if !s.OverwriteExisting && fileExists(path) {
-		return fmt.Errorf("file already exists: %s", path)
-	}
-
-	return s.writeFile(f, path)
-}
-
-func (s *SevenZip) writeFile(f *sevenzip.File, path string) error {
-	rc, err := f.Open()
+	bin, err := os.CreateTemp("", "*7zr.exe")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create temporary 7zr.exe binary file: %w", err)
 	}
-	defer rc.Close()
+	defer bin.Close()
+	s.binPath = bin.Name()
 
-	checksum := !s.SkipVerifyChecksum
-
-	var reader io.Reader
-	var hasher hash.Hash32
-	if checksum {
-		hasher = crc32.NewIEEE()
-		reader = io.TeeReader(rc, hasher)
-	} else {
-		reader = rc
+	if _, err := bin.Write(sevenZipBin); err != nil {
+		return fmt.Errorf("failed to write 7zr.exe binary file: %w", err)
 	}
-	if err := writeNewFile(path, reader, f.FileInfo().Mode()); err != nil {
-		return err
-	}
-	if hasher != nil {
-		if hasher.Sum32() != f.CRC32 {
-			return fmt.Errorf("checksum mismatch for %s", f.Name)
-		}
-	}
-	if s.PreserveModTime {
-		mod := f.FileInfo().ModTime()
-		if err := os.Chtimes(path, mod, mod); err != nil {
-			return fmt.Errorf("setting modtime for %s err: %v", path, err)
-		}
-	}
-
 	return nil
 }
 
-func (*SevenZip) CheckPath(to, filename string) error {
-	to, _ = filepath.Abs(to)
-	dest := filepath.Join(to, filename)
-	//prevent path traversal attacks
-	if !strings.HasPrefix(dest, to) {
-		return &IllegalPathError{AbsolutePath: dest, Filename: filename}
+func (s *SevenZip) extract(ctx context.Context, source, destination string) error {
+	overwriteMode := "-aoa"
+	if s.SkipExistingFiles {
+		overwriteMode = "-aos"
+	}
+	opt := []string{
+		"x", "-y", overwriteMode, "-p" + s.Password, "-o" + filepath.Clean(destination), filepath.Clean(source),
+	}
+	cmd := exec.CommandContext(ctx, s.binPath, opt...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		cmdStr := s.binPath + " " + strings.Join(opt, " ")
+		return fmt.Errorf("failed to extract archive cmd: %s, err: %w, stdout&stderr: %s", cmdStr, err, out)
 	}
 	return nil
+}
+
+func (s *SevenZip) cleanupBin() {
+	if s.binPath != "" {
+		_ = os.Remove(s.binPath)
+	}
 }
 
 func (s *SevenZip) Match(file io.ReadSeeker) (bool, error) {

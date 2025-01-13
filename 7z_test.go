@@ -32,11 +32,68 @@ func TestUnarchiveSevenZip(t *testing.T) {
 	if !bytes.Equal(content, []byte("This is the second file.")) {
 		t.Fatal("file2.txt content mismatch")
 	}
+
+	if err := os.WriteFile(filepath.Join(dst, "file1.txt"), []byte("This is a test file. Modified"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test reuse instance
+	if err := arc.Unarchive("testdata/testarchives/7z/normal.7z", dst); err == nil {
+		t.Fatal("expected error when reuse instance")
+	}
+
+	content, err = os.ReadFile(filepath.Join(dst, "file1.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(content, []byte("This is a test file. Modified")) {
+		t.Fatal("file1.txt content mismatch")
+	}
+
+	// Test overwrite existing files
+	arc = &archiver.SevenZip{SkipExistingFiles: true}
+	if err := arc.Unarchive("testdata/testarchives/7z/normal.7z", dst); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err = os.ReadFile(filepath.Join(dst, "file1.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(content, []byte("This is a test file. Modified")) {
+		t.Fatal("file1.txt content mismatch")
+	}
+	content, err = os.ReadFile(filepath.Join(dst, "file2.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(content, []byte("This is the second file.")) {
+		t.Fatal("file2.txt content mismatch")
+	}
+
+	arc = &archiver.SevenZip{SkipExistingFiles: false}
+	if err := arc.Unarchive("testdata/testarchives/7z/normal.7z", dst); err != nil {
+		t.Fatal(err)
+	}
+	content, err = os.ReadFile(filepath.Join(dst, "file1.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(content, []byte("This is a test file.")) {
+		t.Fatal("file1.txt content mismatch")
+	}
+	content, err = os.ReadFile(filepath.Join(dst, "file2.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(content, []byte("This is the second file.")) {
+		t.Fatal("file2.txt content mismatch")
+	}
 }
 
 func TestUnarchiveSevenZipWithPassword(t *testing.T) {
 	dst := t.TempDir()
-	arc := &archiver.SevenZip{OverwriteExisting: true, Password: "password"}
+	arc := &archiver.SevenZip{Password: "password"}
 
 	// Test with wrong password
 	if err := arc.Unarchive("testdata/testarchives/7z/encrypted-normal.7z", dst); err == nil {
@@ -44,7 +101,7 @@ func TestUnarchiveSevenZipWithPassword(t *testing.T) {
 	}
 
 	// Test with correct password
-	arc.Password = "mypassword"
+	arc = &archiver.SevenZip{Password: "mypassword"}
 	if err := arc.Unarchive("testdata/testarchives/7z/encrypted-normal.7z", dst); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +117,7 @@ func TestUnarchiveSevenZipWithPassword(t *testing.T) {
 
 func TestUnarchiveSevenZipWithPasswordAndCopyOnly(t *testing.T) {
 	dst := t.TempDir()
-	arc := &archiver.SevenZip{OverwriteExisting: true, Password: "password"}
+	arc := &archiver.SevenZip{Password: "password"}
 
 	correctContent := []byte("This is a test file.")
 
@@ -77,7 +134,7 @@ func TestUnarchiveSevenZipWithPasswordAndCopyOnly(t *testing.T) {
 	}
 
 	// Test with correct password
-	arc.Password = "mypassword"
+	arc = &archiver.SevenZip{Password: "mypassword"}
 	if err := arc.Unarchive("testdata/testarchives/7z/encrypted-copy.7z", dst); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +149,7 @@ func TestUnarchiveSevenZipWithPasswordAndCopyOnly(t *testing.T) {
 
 func TestUnarchiveSevenZipWithCopyOnly(t *testing.T) {
 	dst := t.TempDir()
-	arc := &archiver.SevenZip{OverwriteExisting: true}
+	arc := &archiver.SevenZip{}
 
 	if err := arc.Unarchive("testdata/testarchives/7z/copy.7z", dst); err != nil {
 		t.Fatal(err)
@@ -106,20 +163,9 @@ func TestUnarchiveSevenZipWithCopyOnly(t *testing.T) {
 		t.Fatal("file1.txt content mismatch")
 	}
 
+	arc = &archiver.SevenZip{}
 	if err := arc.Unarchive("testdata/testarchives/7z/copy-corrupt.7z", dst); err == nil {
 		t.Fatal("expected error")
-	}
-
-	arc.SkipVerifyChecksum = true
-	if err := arc.Unarchive("testdata/testarchives/7z/copy-corrupt.7z", dst); err != nil {
-		t.Fatal(err)
-	}
-	content, err = os.ReadFile(filepath.Join(dst, "file1.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(content, []byte("This is a test filf.")) {
-		t.Fatalf("file1.txt content mismatch, got %s", content)
 	}
 }
 
@@ -157,28 +203,14 @@ func TestMatchSevenZip(t *testing.T) {
 
 func TestUnarchiveSevenZipPreserveModTime(t *testing.T) {
 	dst := t.TempDir()
-	arc := &archiver.SevenZip{OverwriteExisting: true, PreserveModTime: false}
+	arc := &archiver.SevenZip{}
 
 	modTime := time.Unix(1733564187, 0)
 
 	if err := arc.Unarchive("testdata/testarchives/7z/normal.7z", dst); err != nil {
 		t.Fatal(err)
 	}
-
 	fi, err := os.Stat(filepath.Join(dst, "file1.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if fi.ModTime().Unix() == modTime.Unix() {
-		t.Fatalf("modified timestamp should be now")
-	}
-
-	arc.PreserveModTime = true
-	if err := arc.Unarchive("testdata/testarchives/7z/normal.7z", dst); err != nil {
-		t.Fatal(err)
-	}
-	fi, err = os.Stat(filepath.Join(dst, "file1.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
