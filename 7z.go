@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 
@@ -74,23 +72,6 @@ func (s *SevenZip) prepareBin() error {
 
 	if _, err := bin.Write(sevenZipBin); err != nil {
 		return fmt.Errorf("failed to write 7zr.exe binary file: %w", err)
-	}
-	return nil
-}
-
-func (s *SevenZip) extract(ctx context.Context, source, destination string) error {
-	overwriteMode := "-aoa"
-	if s.SkipExistingFiles {
-		overwriteMode = "-aos"
-	}
-	opt := []string{
-		"x", "-y", overwriteMode, "-p" + s.Password, "-o" + filepath.Clean(destination), filepath.Clean(source),
-	}
-	cmd := exec.CommandContext(ctx, s.binPath, opt...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		cmdStr := s.binPath + " " + strings.Join(opt, " ")
-		return fmt.Errorf("failed to extract archive cmd: %s, err: %w, stdout&stderr: %s", cmdStr, err, out)
 	}
 	return nil
 }
