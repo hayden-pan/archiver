@@ -8,7 +8,7 @@ require (
 	github.com/golang/snappy v0.0.2
 	github.com/klauspost/compress v1.17.9
 	github.com/klauspost/pgzip v1.2.5
-	github.com/nwaples/rardecode v1.1.0
+	github.com/nwaples/rardecode v1.1.3
 	github.com/pierrec/lz4/v4 v4.1.21
 	github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d
 	github.com/ulikunitz/xz v0.5.12

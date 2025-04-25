@@ -3,18 +3,13 @@ package archiver
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync/atomic"
 
-	_ "embed"
+	"github.com/hayden-pan/archiver/v3/sevenzip"
 )
-
-//go:embed bin/7zr.exe
-var sevenZipBin []byte
 
 type SevenZip struct {
 	// Whether to skip extracting of existing files.
@@ -24,8 +19,6 @@ type SevenZip struct {
 	Password string
 
 	used atomic.Bool
-
-	binPath string
 }
 
 // CheckExt ensures the file extension matches the format.
@@ -41,45 +34,20 @@ func (s *SevenZip) Unarchive(source, destination string) error {
 }
 
 func (s *SevenZip) UnarchiveContext(ctx context.Context, source, destination string) error {
-	if err := s.prepareBin(); err != nil {
-		return err
+	if s.used.Swap(true) {
+		// Forbidden reuse of the instance to preevent multiple extractions
+		return fmt.Errorf("instance already used")
 	}
-	defer s.cleanupBin()
 
-	err := s.extract(ctx, source, destination)
-
+	sz := sevenzip.NewSevenZip(sevenzip.SevenZipOptions{SkipExistingFiles: s.SkipExistingFiles, Password: s.Password})
+	err := sz.Extract(ctx, source, destination)
 	if ctx.Err() != nil {
 		return fmt.Errorf("context canceled before extrating done: %w, output: %v", context.Cause(ctx), err)
 	}
 	if err != nil {
 		return err
 	}
-
 	return nil
-}
-
-func (s *SevenZip) prepareBin() error {
-	if s.used.Swap(true) {
-		return errors.New("the instance of the 7z unarchiver has already been used, please create another instance")
-	}
-
-	bin, err := os.CreateTemp("", "*7zr.exe")
-	if err != nil {
-		return fmt.Errorf("failed to create temporary 7zr.exe binary file: %w", err)
-	}
-	defer bin.Close()
-	s.binPath = bin.Name()
-
-	if _, err := bin.Write(sevenZipBin); err != nil {
-		return fmt.Errorf("failed to write 7zr.exe binary file: %w", err)
-	}
-	return nil
-}
-
-func (s *SevenZip) cleanupBin() {
-	if s.binPath != "" {
-		_ = os.Remove(s.binPath)
-	}
 }
 
 func (s *SevenZip) Match(file io.ReadSeeker) (bool, error) {

@@ -1,18 +1,66 @@
-package archiver
+package sevenzip
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"unsafe"
+
+	_ "embed"
 
 	"golang.org/x/sys/windows"
 )
 
-func (s *SevenZip) extract(ctx context.Context, source, destination string) error {
+//go:embed 7z.exe
+var sevenZipExe []byte
+
+//go:embed 7z.dll
+var sevenZipLib []byte
+
+type embeddedFile struct {
+	data      []byte
+	name      string
+	execuable bool
+}
+
+var embeddedFiles = []embeddedFile{
+	{data: sevenZipLib, name: "7z.dll"},
+	{data: sevenZipExe, name: "7z.exe", execuable: true},
+}
+
+type sevenZip struct {
+	// Whether to skip extracting of existing files.
+	SkipExistingFiles bool
+
+	// The password to open archives (optional).
+	Password string
+
+	used atomic.Bool
+
+	tempDir string
+
+	binPath string
+}
+
+func newSevenZip(options SevenZipOptions) *sevenZip {
+	return &sevenZip{
+		SkipExistingFiles: options.SkipExistingFiles,
+		Password:          options.Password,
+	}
+}
+
+func (s *sevenZip) Extract(ctx context.Context, source, destination string) error {
+	if err := s.prepareEmbeddedFiles(); err != nil {
+		return err
+	}
+	defer s.cleanupTempDir()
+
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create job object: %w", err)
@@ -58,6 +106,36 @@ func (s *SevenZip) extract(ctx context.Context, source, destination string) erro
 	}
 
 	return nil
+}
+
+func (s *sevenZip) prepareEmbeddedFiles() error {
+	if s.used.Swap(true) {
+		return errors.New("the instance of the 7z unarchiver has already been used, please create another instance")
+	}
+	dir, err := os.MkdirTemp("", "archiver-7z-")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	s.tempDir = dir
+	for _, file := range embeddedFiles {
+		path := filepath.Join(dir, file.name)
+		if err := os.WriteFile(path, file.data, 0644); err != nil {
+			return fmt.Errorf("failed to write file %s: %w", file.name, err)
+		}
+		if file.execuable {
+			if s.binPath != "" {
+				return errors.New("more than one executable file found")
+			}
+			s.binPath = path
+		}
+	}
+	return nil
+}
+
+func (s *sevenZip) cleanupTempDir() {
+	if s.tempDir != "" {
+		_ = os.RemoveAll(s.tempDir)
+	}
 }
 
 func setInformation(job windows.Handle) error {
